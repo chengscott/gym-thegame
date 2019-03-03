@@ -1,0 +1,2 @@
+from gym_thegame.envs.thegame_env import ThegameEnv
+from gym_thegame.envs.thegame_simple_env import ThegameSimpleEnv
