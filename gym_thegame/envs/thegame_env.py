@@ -1,7 +1,10 @@
 import gym
 from gym import error, spaces
 from gym.utils import seeding
-from gym_thegame.envs import Server, Client
+from gym_thegame.envs.server import Server
+from gym_thegame.envs.client import Client
+from time import sleep
+import multiprocessing
 
 class ThegameEnv(gym.Env):
   WIDTH, HEIGHT = 200, 100
@@ -12,14 +15,11 @@ class ThegameEnv(gym.Env):
       'video.res_h': HEIGHT,
   }
 
-  def __init__(self, server, port=50051, name='gym'):
+  def __init__(self, server='./thegame-server', port=50051, name='gym'):
     self.observation_space = spaces.Box(
-        shape=(WIDTH, HEIGHT, 3), low=0, high=255)
-    self.action_space = spaces.Dict({
-        'shoot': spaces.Discrete(12),
-        'accelerate': spaces.Discrete(12),
-        'ability': spaces.Discrete(8),
-    })
+        shape=(ThegameEnv.WIDTH, ThegameEnv.HEIGHT, 3), low=0, high=255)
+    # shoot, accelerate, ability
+    self.action_space = spaces.MultiDiscrete([12, 12, 8])
 
     # thegame server
     self.server = Server(server, port)
@@ -32,8 +32,10 @@ class ThegameEnv(gym.Env):
     self.client = multiprocessing.Process(
         target=Client.main,
         args=(
-            ':{}'.format(port),
+            'localhost:{}'.format(port),
             name,
+            ThegameEnv.WIDTH,
+            ThegameEnv.HEIGHT,
             self.pipe_actions[1],
             self.pipe_obv_reward[0],
         ))
@@ -45,7 +47,7 @@ class ThegameEnv(gym.Env):
     self.server.sync()
     obv, reward = self.pipe_obv_reward[1].recv()
     # TODO: done
-    return obv, np.array([reward]), np.array([done]), []
+    return obv, [reward], [done], []
 
   def reset(self):
     self.server.sync()
@@ -58,6 +60,3 @@ class ThegameEnv(gym.Env):
   def close(self):
     self.client.terminate()
     self.server.terminate()
-
-  def seed(self):
-    pass
