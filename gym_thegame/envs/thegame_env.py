@@ -7,6 +7,7 @@ import configparser
 import math
 import multiprocessing
 from time import sleep
+import numpy as np
 
 
 class ThegameEnv(gym.Env):
@@ -34,6 +35,9 @@ class ThegameEnv(gym.Env):
         shape=(self.width, self.height, 3), low=0, high=255)
     # actions: (shoot, accelerate, ability)
     self.action_space = spaces.MultiDiscrete([12, 12, 8])
+    self.viewer = None
+    self.obv = np.zeros((ThegameEnv.WIDTH, ThegameEnv.HEIGHT, 3),
+                        dtype=np.uint8)
 
   def seed(self, seed=None):
     self.np_random, seed = seeding.np_random(seed)
@@ -50,6 +54,7 @@ class ThegameEnv(gym.Env):
     self.pipe_actions[0].send(actions)
     self.server.sync()
     obv, reward = self.pipe_obv_reward[1].recv()
+    self.obv = obv
     self.counter += 1
     done = self.counter >= self.total_steps
     return obv, reward, done, {}
@@ -80,10 +85,19 @@ class ThegameEnv(gym.Env):
     self.counter = 0
     self.server.sync()
     obv, _ = self.pipe_obv_reward[1].recv()
+    self.obv = obv
     return obv
 
   def render(self, mode='human', close=False):
-    pass
+    img = np.array(self.obv, dtype=np.uint8)
+    if mode == 'rgb_array':
+      return img
+    elif mode == 'human':
+      from gym.envs.classic_control import rendering
+      if self.viewer is None:
+        self.viewer = rendering.SimpleImageViewer()
+    self.viewer.imshow(img)
+    return self.viewer.isopen
 
   def close(self):
     if self.client:
