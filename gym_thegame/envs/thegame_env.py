@@ -3,6 +3,7 @@ from gym import logger, spaces
 from gym.utils import seeding
 from gym_thegame.envs.server import Server
 from gym_thegame.envs.client import Client
+import configparser
 import math
 import multiprocessing
 from time import sleep
@@ -11,21 +12,27 @@ from time import sleep
 class ThegameEnv(gym.Env):
   """thegame environment
   """
-  WIDTH, HEIGHT = 160, 160
-  TOTAL_STEPS = 10000
-  metadata = {
-      'render.modes': ['human', 'rgb_array'],
-      'video.res_w': WIDTH,
-      'video.res_h': HEIGHT,
-  }
+  metadata = {'render.modes': ['human', 'rgb_array']}
 
-  def __init__(self, server='./thegame-server', port=50051, name='gym'):
-    self.server_bin, self.port = server, port
-    self.name = name
+  def __init__(self):
+    config = configparser.ConfigParser()
+    config.read('thegame.cfg')
+    cfg = config['DEFAULT']
+    self.server_bin = cfg.get('ServerBinary', './thegame-server')
+    self.port = cfg.getint('Port', 50051)
+    self.name = cfg.get('Name', 'gym')
+    if 'Environment' in config:
+      cfg = config['Environment']
+    self.width = cfg.getint('Width', 160)
+    self.height = cfg.getint('Height', 160)
+    self.total_steps = cfg.getint('TotalSteps', 10000)
+    self.shoot_disc = cfg.getint('ShootDiscretize', 12)
+    self.acc_disc = cfg.getint('AccelerateDiscretize', 12)
     self.server, self.client = None, None
+    # obs: (width, height, channel)
     self.observation_space = spaces.Box(
-        shape=(ThegameEnv.WIDTH, ThegameEnv.HEIGHT, 3), low=0, high=255)
-    # shoot, accelerate, ability
+        shape=(self.width, self.height, 3), low=0, high=255)
+    # actions: (shoot, accelerate, ability)
     self.action_space = spaces.MultiDiscrete([12, 12, 8])
 
   def seed(self, seed=None):
@@ -44,7 +51,7 @@ class ThegameEnv(gym.Env):
     self.server.sync()
     obv, reward = self.pipe_obv_reward[1].recv()
     self.counter += 1
-    done = self.counter >= ThegameEnv.TOTAL_STEPS
+    done = self.counter >= self.total_steps
     return obv, reward, done, {}
 
   def reset(self):
@@ -62,8 +69,8 @@ class ThegameEnv(gym.Env):
         args=(
             'localhost:{}'.format(self.port),
             self.name,
-            ThegameEnv.WIDTH,
-            ThegameEnv.HEIGHT,
+            self.width,
+            self.height,
             self.pipe_actions[1],
             self.pipe_obv_reward[0],
         ))
