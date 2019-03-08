@@ -4,6 +4,8 @@ import numpy as np
 
 
 class Client(HeadlessClient):
+  XMax, YMax = 5000, 4000
+
   def __init__(self, name, width, height, *pipes):
     self.name = name
     self.width, self.height = width, height
@@ -34,16 +36,15 @@ class Client(HeadlessClient):
     def draw_boundary(state):
       hx, hy = hero.position
       hx, hy = hx / 10, hy / 10
-      max_map_x, max_map_y = 5000 / 10, 4000 / 10
+      x_max, y_max = Client.XMax / 10, Client.YMax / 10
       up_bound = int(max(0, self.height / 2 - hy))
       left_bound = int(max(0, self.width / 2 - hx))
-      down_bound = int(min(self.height, self.height / 2 + (max_map_y - hy)))
-      right_bound = int(min(self.width, self.width / 2 + (max_map_x - hx)))
+      down_bound = int(min(self.height, self.height / 2 + (y_max - hy)))
+      right_bound = int(min(self.width, self.width / 2 + (x_max - hx)))
       state[0:left_bound, :, :] = 0
       state[:, 0:up_bound, :] = 0
       state[right_bound:self.width, :, :] = 0
       state[:, down_bound:self.height, :] = 0
-      return state
 
     def draw(state, obj, color_range):
       """draw `obj` relative to current hero position"""
@@ -61,7 +62,6 @@ class Client(HeadlessClient):
           for j in range(ly, ry):
             if (i - x)**2 + (j - y)**2 <= radius**2:
               state[i, j, channel] = value
-      return state
 
     #
     # color range: (start rgb, end rgb)
@@ -77,8 +77,7 @@ class Client(HeadlessClient):
     # heroes, other bullets: red
     other_color = ((114, 11, 11), (239, 103, 103))
 
-    state = np.full((self.width, self.height, 3), 255)
-    draw_boundary(state)
+    state = np.full((self.width, self.height, 3), 255, dtype=np.uint8)
 
     for polygon in polygons:
       draw(state, polygon, polygon_color[polygon.edges])
@@ -90,6 +89,7 @@ class Client(HeadlessClient):
     for hero_ in heroes:
       draw(state, hero_, other_color)
     draw(state, hero, hero_color)
+    draw_boundary(state)
 
     return state
 
