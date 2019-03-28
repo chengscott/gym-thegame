@@ -1,16 +1,13 @@
-import gym
 from gym import logger, spaces
 from gym.utils import seeding
-from gym_thegame.envs.server import Server
 from gym_thegame.envs.client import Client
+from thegame.experimental.gymbase import SinglePlayerEnv, Controls
 import configparser
 import math
-import multiprocessing
-from time import sleep
 import numpy as np
 
 
-class ThegameEnv(gym.Env):
+class ThegameEnv(SinglePlayerEnv):
   """thegame environment
   """
   metadata = {'render.modes': ['human', 'rgb_array']}
@@ -26,10 +23,14 @@ class ThegameEnv(gym.Env):
       cfg = config['Environment']
     self.width = cfg.getint('Width', 160)
     self.height = cfg.getint('Height', 160)
-    self.total_steps = cfg.getint('TotalSteps', 10000)
+    total_steps = cfg.getint('TotalSteps', 10000)
+    super().__init__(
+      server_bin=self.server_bin,
+      listen=':{}'.format(self.port),
+      total_steps=total_steps,
+      client_name=self.name)
     self.acc_disc = cfg.getint('AccelerateDiscretize', 12)
     self.shoot_disc = cfg.getint('ShootDiscretize', 12)
-    self.server, self.client = None, None
     # obs: (width, height, channel)
     self.observation_space = spaces.Box(
         shape=(self.width, self.height, 3), low=0, high=255)
@@ -43,7 +44,7 @@ class ThegameEnv(gym.Env):
     self.np_random, seed = seeding.np_random(seed)
     return [seed]
 
-  def step(self, actions):
+  def action_to_controls(self, actions):
     def convert_to_radians(actions):
       acc_dir, shoot_dir, ability_type = actions
       acc_dir = acc_dir / self.acc_disc * 2 * math.pi
@@ -51,40 +52,26 @@ class ThegameEnv(gym.Env):
       return acc_dir, shoot_dir, ability_type
 
     actions = convert_to_radians(actions)
-    self.pipe_actions[0].send(actions)
-    self.server.sync()
-    self.obv, reward = self.pipe_obv_reward[1].recv()
-    self.counter += 1
-    done = self.counter >= self.total_steps
-    return self.obv, reward, done, {}
 
-  def reset(self):
-    self.close()
-    # thegame server
-    self.server = Server(self.server_bin, self.port)
-    self.server.start()
-    sleep(2)
+    return Controls(
+      shoot=True,
+      shoot_direction=actions[1],
+      accelerate=True,
+      acceleration_direction=actions[0],
+      level_up=[actions[2]]
+    )
 
-    # thegame client
-    self.pipe_obv_reward = multiprocessing.Pipe()
-    self.pipe_actions = multiprocessing.Pipe()
-    self.client = multiprocessing.Process(
-        target=Client.main,
-        args=(
-            'localhost:{}'.format(self.port),
-            self.name,
-            self.width,
-            self.height,
-            self.pipe_actions[1],
-            self.pipe_obv_reward[0],
-        ))
-    self.client.start()
-    sleep(2)
+  _to_state = Client._to_state
 
-    self.counter = 0
-    self.server.sync()
-    self.obv, _ = self.pipe_obv_reward[1].recv()
-    return self.obv
+  def game_state_to_observation(self, game_state):
+    return self._to_state(
+      hero=game_state.hero,
+      heroes=game_state.heroes,
+      polygons=game_state.polygons,
+      bullets=game_state.bullets)
+
+  def get_reward(self, prev_state, current_state):
+    return current_state.hero.score - prev_state.hero.score
 
   def render(self, mode='human'):
     img = np.array(self.obv, dtype=np.uint8)
@@ -101,7 +88,3 @@ class ThegameEnv(gym.Env):
   def close(self):
     if self.viewer:
       self.viewer.close()
-    if self.client:
-      self.client.terminate()
-    if self.server:
-      self.server.terminate()

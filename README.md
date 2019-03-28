@@ -2,13 +2,12 @@
 
 ## Install with thegame
 
-- use the [sync version](https://github.com/chengscott/thegame) of thegame server
-
 ```shell
+go get -u github.com/afg984/thegame/server/go/thegame
 pip install --upgrade git+https://github.com/openai/gym.git
 pip install --upgrade git+https://github.com/openai/baselines.git
 pip install --upgrade git+https://github.com/chengscott/gym-thegame.git
-pip install --upgrade git+https://github.com/chengscott/thegame.git#subdirectory=client/python
+pip install --upgrade git+https://github.com/afg984/thegame.git#subdirectory=client/python
 ```
 
 ## Run with baselines
@@ -20,6 +19,5 @@ python -m baselines.run --extra_import gym_thegame --env=thegame-v0 --alg=ppo2 -
 - view as an audience
 
 ```shell
-python -m thegame.gui.audience localhost:50051
+python -m thegame.gui.spectator localhost:50051 --smooth
 ```
-
