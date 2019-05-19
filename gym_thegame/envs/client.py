@@ -1,97 +1,64 @@
-from thegame import HeadlessClient
+from thegame import HeadlessClient, Ability
 from gym import logger
 import numpy as np
+import math
+import sys
 
 
 class Client(HeadlessClient):
   XMax, YMax = 5000, 4000
 
-  def __init__(self, name, width, height, *pipes):
-    self.name = name
-    self.width, self.height = width, height
+  def __init__(self, args, *pipes):
+    self.name = args.name
+    self.args = args
     self.pipe_actions, self.pipe_obv_reward = pipes
+
+    # environment state preserve
     self.prev_score = 0
-    self.reward = 0
+    self.prev_enemies = {}
 
   def action(self, hero, heroes, polygons, bullets):
-    # send observation and reward
-    self.observation = self._to_state(hero, heroes, polygons, bullets)
-    self.reward = hero.score - self.prev_score
+    # reward calculate
+    def reward_scaling(e_cur, e_prev):
+      health, max_health, exp = e_cur
+      health_prev, _, _ = e_prev
+      if health >= health_prev:
+        return 0
+      discount_factor = (health_prev -
+                         health) / max_health * (1.5 - health / max_health)
+      return exp * discount_factor / 2
+
+    enemies = {}
+    reward = 0
+    for e in [*heroes, *polygons]:
+      enemies[e.id] = (e.health, e.max_health, e.rewarding_experience)
+    for e_id in enemies.keys() & self.prev_enemies.keys():
+      reward += reward_scaling(enemies[e_id], self.prev_enemies[e_id])
+
+    reward += (hero.score - self.prev_score) / 2
+
     self.prev_score = hero.score
-    self.pipe_obv_reward.send((self.observation, self.reward))
+    self.prev_enemies = enemies
+    self.pipe_obv_reward.send(((hero, heroes, polygons, bullets), reward))
+
     # receive actions
-    actions = self.pipe_actions.recv()
+    actions, move_to = self.pipe_actions.recv()
+
+    if move_to:
+      self.accelerate_towards(*move_to)
+      return
+
     logger.info('recv actions', actions)
+
     # perform actions
-    acc_dir, shoot_dir, ability_type = actions
-    self.accelerate(acc_dir)
-    self.shoot(shoot_dir)
-    self.level_up(ability_type)
+    shoot_dir, acc_dir, ability_type = actions
 
-  def _to_state(self, hero, heroes, polygons, bullets):
-    def interp(color_range, ratio):
-      return (int(end - (end - start) * ratio)
-              for start, end in zip(*color_range))
-
-    def draw_boundary(state):
-      hx, hy = hero.position
-      hx, hy = hx / 10, hy / 10
-      x_max, y_max = Client.XMax / 10, Client.YMax / 10
-      up_bound = int(max(0, self.height / 2 - hy))
-      left_bound = int(max(0, self.width / 2 - hx))
-      down_bound = int(min(self.height, self.height / 2 + (y_max - hy)))
-      right_bound = int(min(self.width, self.width / 2 + (x_max - hx)))
-      state[0:left_bound, :, :] = 0
-      state[:, 0:up_bound, :] = 0
-      state[right_bound:self.width, :, :] = 0
-      state[:, down_bound:self.height, :] = 0
-
-    def draw(state, obj, color_range):
-      """draw `obj` relative to current hero position"""
-      color = interp(color_range, obj.health / obj.max_health)
-      hx, hy = hero.position
-      x, y = obj.position
-      x, y, hx, hy = x / 10, y / 10, hx / 10, hy / 10
-      radius = obj.radius / 10
-      x += self.width / 2 - hx
-      y += self.height / 2 - hy
-      lx, rx = int(max(0, x - radius)), int(min(self.width, x + radius))
-      ly, ry = int(max(0, y - radius)), int(min(self.height, y + radius))
-      for channel, value in enumerate(color):
-        for i in range(lx, rx):
-          for j in range(ly, ry):
-            if (i - x)**2 + (j - y)**2 <= radius**2:
-              state[i, j, channel] = value
-
-    #
-    # color range: (start rgb, end rgb)
-    #
-    # hero, own bullets: green
-    hero_color = ((16, 79, 15), (119, 226, 118))
-    # polygons: blue
-    polygon_color = {
-        3: ((33, 47, 104), (96, 115, 196)),
-        4: ((33, 23, 84), (112, 98, 188)),
-        5: ((23, 63, 89), (89, 148, 186)),
-    }
-    # heroes, other bullets: red
-    other_color = ((114, 11, 11), (239, 103, 103))
-
-    state = np.full((self.width, self.height, 3), 255, dtype=np.uint8)
-
-    for polygon in polygons:
-      draw(state, polygon, polygon_color[polygon.edges])
-    for bullet in bullets:
-      if bullet.owner_id == hero.id:
-        draw(state, bullet, hero_color)
-      else:
-        draw(state, bullet, other_color)
-    for hero_ in heroes:
-      draw(state, hero_, other_color)
-    draw(state, hero, hero_color)
-    draw_boundary(state)
-
-    return state
+    if shoot_dir != None:
+      self.shoot(shoot_dir)
+    if acc_dir != None:
+      self.accelerate(acc_dir)
+    if ability_type != None:
+      self.level_up(ability_type)
 
   @classmethod
   def main(cls, remote, *args):

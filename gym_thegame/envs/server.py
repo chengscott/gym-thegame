@@ -6,8 +6,9 @@ class Server:
     self.cmd = [server, '-listen', ':{}'.format(port)]
 
   def start(self):
-    self.proc = subprocess.Popen(
-        self.cmd, stdin=subprocess.PIPE, encoding='utf-8')
+    self.proc = subprocess.Popen(self.cmd,
+                                 stdin=subprocess.PIPE,
+                                 encoding='utf-8')
 
   def _send(self, cmd):
     self.proc.stdin.write(cmd)

@@ -15,5 +15,5 @@ class ThegameSimpleEnv(gym.Env):
   def reset(self):
     pass
 
-  def render(self, mode='human', close=False):
+  def render(self, mode='human'):
     pass

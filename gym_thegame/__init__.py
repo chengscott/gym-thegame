@@ -8,3 +8,7 @@ register(
     id='thegame-simple-v0',
     entry_point='gym_thegame.envs:ThegameSimpleEnv',
 )
+register(
+    id='thegame-train-v0',
+    entry_point='gym_thegame.envs:ThegameTrainEnv',
+)
