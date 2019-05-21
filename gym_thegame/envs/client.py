@@ -62,6 +62,10 @@ class Client(HeadlessClient):
 
   @classmethod
   def main(cls, remote, *args):
+    class Option:
+      pass
+
     self = cls(*args)
-    self.remote = remote
+    self.options = Option()
+    self.options.remote = remote
     self.run()

@@ -5,8 +5,8 @@ register(
     entry_point='gym_thegame.envs:ThegameEnv',
 )
 register(
-    id='thegame-simple-v0',
-    entry_point='gym_thegame.envs:ThegameSimpleEnv',
+    id='thegame-v1',
+    entry_point='gym_thegame.envs:ThegameEnvV1',
 )
 register(
     id='thegame-train-v0',

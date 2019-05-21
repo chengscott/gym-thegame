@@ -1,4 +1,92 @@
+from baselines.common.atari_wrappers import LazyFrames
+from gym import spaces
+import math
 import numpy as np
+
+
+def parse_args(filename='thegame.cfg'):
+  """
+  TotalSteps: episode game length, -1 means game end if shot
+  SkipFrame: skipped frame between two stacked frames. (0 if no skip frame)
+  SkackFrame: number of stacked frames
+  PolyGenDirs: polygons possible generate directions, -1 means uniform 0 ~ 2pi
+  PolyDirs: polygons be generated directions per game
+  PolyGenRange: polygons generate range divider. 8 means 2pi / 8
+  PolyGenNum: polygons generate number
+  PolyShootableNum: polygons generate number of must shootable
+  """
+  import configparser
+
+  class Args:
+    pass
+
+  args = Args()
+  # [Environment] section arguments
+  env_args = {
+      'width': ('Width', 80),
+      'height': ('Height', 80),
+      'total_steps': ('TotalSteps', 2048),
+      'acc_disc': ('AccelerateDiscretize', 0),
+      'shoot_disc': ('ShootDiscretize', 5),
+      'skip_frame': ('SkipFrame', 0),
+      'stack_frame': ('StackFrame', 1),
+      'bg_color': ('BGColor', 0),
+      'boundary_color': ('BoundaryColor', 0),
+      'cool_down': ('CoolDown', 15),
+      'bullet_speed': ('BulletSpeed', 30),
+      'poly_gen_dirs': ('PolyGenDirs', -1),
+      'poly_dirs': ('PolyDirs', 1),
+      'poly_gen_range': ('PolyGenRange', 5),
+      'poly_gen_num': ('PolyGenNum', 15),
+      'poly_shootable_num': ('PolyShootableNum', 7)
+  }
+  # parse cfg
+  config = configparser.ConfigParser()
+  config.read(filename)
+  cfg = config['DEFAULT']
+  args.server_bin = cfg.get('ServerBinary', './thegame-server')
+  args.port = cfg.getint('Port', 50051)
+  args.name = cfg.get('Name', 'gym')
+  if 'Environment' in config:
+    cfg = config['Environment']
+  args.obv_type = cfg.get('ObvType', 'gray')
+  for k, v in env_args.items():
+    setattr(args, k, cfg.getint(*v))
+  # postprocessing
+  args.skip_frame += 1
+  args.quantize = 1600 / args.width
+  args.total_frame = args.stack_frame * args.skip_frame
+  return args
+
+
+def get_obs_space(args):
+  if args.obv_type == 'gray':
+    return spaces.Box(shape=(args.width, args.height, args.stack_frame),
+                      low=0,
+                      high=1)
+    return spaces.Box(shape=(args.width, args.height, 3 * args.stack_frame),
+                      low=-1,
+                      high=1)
+
+
+def convert_to_radians(action, args):
+  """
+  convert directions to radian
+  input action: (shoot_dir, acc_dir, ability_type)
+  note: `acc_dir` and `ability_type` can be None
+  return either:
+    (shoot_dir, None, None)
+    (shoot_dir, acc_dir, None)
+    (shoot_dir, acc_dir, ability_type)
+  """
+  if action is None:
+    return None, None, None
+  shoot_dir, acc_dir, ability_type = action, None, None
+  if args.acc_disc:
+    shoot_dir, acc_dir, ability_type, *_ = *action, None, None
+    acc_dir = acc_dir / args.acc_disc * 2 * math.pi
+  shoot_dir = shoot_dir / args.shoot_disc * 2 * math.pi
+  return shoot_dir, acc_dir, ability_type
 
 
 def draw_boundary(hero, state, args):

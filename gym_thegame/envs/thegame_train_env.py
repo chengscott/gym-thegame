@@ -1,14 +1,11 @@
+from gym_thegame.envs.utils import (LazyFrames, parse_args, get_obs_space,
+                                    get_to_state_fn, convert_to_radians)
 import gym
-from gym import error, spaces, utils
-from gym.utils import seeding
-import configparser
+from gym import logger, spaces
 from collections import deque
-import random
 import math
+import random
 import numpy as np
-import sys
-from baselines.common.atari_wrappers import LazyFrames
-from gym_thegame.envs.utils import get_to_state_fn
 
 
 class Obj:
@@ -37,82 +34,26 @@ class Obj:
     self.move = move  # for bullet
 
 
-def parse_args(filename='thegame.cfg'):
-  """
-  TotalSteps: episode game length, -1 means game end if shot
-  SkipFrame: skipped frame between two stacked frames. (0 if no skip frame)
-  SkackFrame: number of stacked frames
-  PolyGenDirs: polygons possible generate directions, -1 means uniform 0 ~ 2pi
-  PolyDirs: polygons be generated directions per game
-  PolyGenRange: polygons generate range divider. 8 means 2pi / 8
-  PolyGenNum: polygons generate number
-  PolyShootableNum: polygons generate number of must shootable
-  """
-
-  class Args:
-    pass
-
-  args = Args()
-  # [Environment] section arguments
-  env_args = {
-      'width': ('Width', 80),
-      'height': ('Height', 80),
-      'total_steps': ('TotalSteps', 2048),
-      'acc_disc': ('AccelerationDistcretize', 0),
-      'shoot_disc': ('ShootDiscretize', 5),
-      'skip_frame': ('SkipFrame', 0),
-      'stack_frame': ('StackFrame', 1),
-      'bg_color': ('BGColor', 0),
-      'boundary_color': ('BoundaryColor', 0),
-      'cool_down': ('CoolDown', 15),
-      'bullet_speed': ('BulletSpeed', 30),
-      'poly_gen_dirs': ('PolyGenDirs', -1),
-      'poly_dirs': ('PolyDirs', 1),
-      'poly_gen_range': ('PolyGenRange', 5),
-      'poly_gen_num': ('PolyGenNum', 15),
-      'poly_shootable_num': ('PolyShootableNum', 7)
-  }
-  # parse cfg
-  config = configparser.ConfigParser()
-  config.read(filename)
-  cfg = config['DEFAULT']
-  args.name = cfg.get('Name', 'gym')
-  if 'Environment' in config:
-    cfg = config['Environment']
-  args.obv_type = cfg.get('ObvType', 'gray')
-  for k, v in env_args.items():
-    setattr(args, k, cfg.getint(*v))
-  # postprocessing
-  args.skip_frame += 1
-  args.quantize = 1600 / args.width
-  args.total_frame = args.stack_frame * args.skip_frame
-  return args
-
-
 class ThegameTrainEnv(gym.Env):
   metadata = {'render.modes': ['human', 'rgb_array']}
 
   def __init__(self):
     self.args = parse_args()
+    self.viewer = None
+    ### training environment ###
+    self.reset_counter = 0
+    self.env_state = None, [], [], []
+    # reset jump angle: (counter * multiply) % gen_directions
+    for m in range(self.args.poly_gen_dirs // 4, self.args.poly_gen_dirs):
+      if math.gcd(m, self.args.poly_gen_dirs) == 1:
+        self.multiply = m
+        break
 
     ### training agent ###
     self.obv = deque([], maxlen=self.args.total_frame)
-    self.viewer = None
-
+    self.to_state_fn = get_to_state_fn[self.args.obv_type]
     # observation space
-    if self.args.obv_type == 'gray':
-      self.observation_space = spaces.Box(shape=(self.args.width,
-                                                 self.args.height,
-                                                 self.args.stack_frame),
-                                          low=0,
-                                          high=1)
-    else:
-      self.observation_space = spaces.Box(shape=(self.args.width,
-                                                 self.args.height,
-                                                 3 * self.args.stack_frame),
-                                          low=-1,
-                                          high=1)
-
+    self.observation_space = get_obs_space(self.args)
     # action space
     if self.args.shoot_disc == -1:
       self.action_space = spaces.Box(shape=(1, ),
@@ -122,28 +63,15 @@ class ThegameTrainEnv(gym.Env):
     else:
       self.action_space = spaces.Discrete(self.args.shoot_disc)
 
-    ### training environment ###
-    self.reset_counter = 0
-
-    # internal state
-    self.env_state = None, [], [], []
-    self.to_state_fn = get_to_state_fn[self.args.obv_type]
-
-    # reset jump angle: (counter * multiply) % gen_directions
-    for m in range(self.args.poly_gen_dirs // 4, self.args.poly_gen_dirs):
-      if math.gcd(m, self.args.poly_gen_dirs) == 1:
-        self.multiply = m
-        break
-
   def step(self, action):
     """
     env step function
     obv, reward, done, info = step(action)
     """
     if self.args.shoot_disc == -1:
-      shoot_dir = action * np.pi
+      shoot_dir = action * math.pi
     else:
-      shoot_dir = action / self.args.shoot_disc * 2 * np.pi
+      shoot_dir = action / self.args.shoot_disc * 2 * math.pi
 
     def collide(obj1, obj2):
       """
@@ -221,7 +149,6 @@ class ThegameTrainEnv(gym.Env):
       done = self.counter >= self.args.total_steps
       if reward != 0:
         print('timestep', self.counter, 'reward', reward)
-        sys.stdout.flush()
 
     return LazyFrames(obv), np.clip(reward / 40, -10, 10), done, {}
     #return np.concatenate(obv, axis=-1), np.clip(reward / 40, -10, 10), done, {}
@@ -234,7 +161,6 @@ class ThegameTrainEnv(gym.Env):
     2. initialize internal states
     3. return initial stack frames
     """
-
     # random init hero position
     hx, hy = random.randint(300, 4700), random.randint(300, 3700)
     polys = []
@@ -246,11 +172,11 @@ class ThegameTrainEnv(gym.Env):
     if self.args.poly_gen_dirs == -1:
       # uniform random
       for _ in range(self.args.poly_dirs):
-        thetas.append(random.uniform(0, 2 * np.pi))
+        thetas.append(random.uniform(0, 2 * math.pi))
     else:
       # first direction = (counter * multiply) % poly_gen_dirs
       theta = (int(self.reset_counter * self.multiply) %
-               self.args.poly_gen_dirs) / self.args.poly_gen_dirs * 2 * np.pi
+               self.args.poly_gen_dirs) / self.args.poly_gen_dirs * 2 * math.pi
       self.reset_counter += 1
       thetas.append(theta)
 
@@ -258,7 +184,7 @@ class ThegameTrainEnv(gym.Env):
       for _ in range(1, self.args.poly_dirs):
         thetas.append(
             random.randint(0, self.args.poly_gen_dirs - 1) /
-            self.args.poly_gen_dirs * 2 * np.pi)
+            self.args.poly_gen_dirs * 2 * math.pi)
 
     # generate polygons using polygons generating directions
     total_reward = 0
@@ -292,7 +218,6 @@ class ThegameTrainEnv(gym.Env):
     print(f'reset with hero position ({hx}, {hy})')
     print(f'reward {total_reward / 40} for killing all polygons')
     print(f'thetas {thetas} for generating polygons')
-    sys.stdout.flush()
 
     # initial hero and env internal state
     hero = Obj(position=(hx, hy), radius=30)
@@ -307,7 +232,6 @@ class ThegameTrainEnv(gym.Env):
       self.obv.append(obv)
 
     return LazyFrames([obv] * self.args.stack_frame)
-    #return np.concatenate([obv] * self.args.stack_frame, axis=-1)
 
   def render(self, mode='human'):
     img = self.img
