@@ -53,7 +53,9 @@ class ThegameEnvV1(SinglePlayerEnv):
     if reset:
       for _ in range(self.args.total_frame):
         self.obv.append(obv)
-    # stack and skip frames
+      return LazyFrames([obv] * self.args.stack_frame)
+    # update frame buffer
+    self.obv.append(obv)
     obv = [
         self.obv[i]
         for i in range(0, self.args.total_frame, self.args.skip_frame)
